@@ -34,6 +34,7 @@ FROM production AS test
 USER root
 COPY --from=test-dependencies /test-install /usr/local
 COPY tests ./tests
+COPY compose.yaml Dockerfile ./
 RUN mkdir /tmp/pytest-cache \
     && chown -R app:app /app/tests /tmp/pytest-cache
 ENV PYTEST_ADDOPTS="-o cache_dir=/tmp/pytest-cache"
