@@ -58,8 +58,8 @@ def test_writes_exact_artifact_names_schemas_and_reconciled_counts(tmp_path: Pat
 
     paths = write_audit_artifacts(result, tmp_path)
 
-    assert tuple(paths) == ARTIFACT_FILENAMES
-    assert {path.name for path in paths.values()} == set(ARTIFACT_FILENAMES)
+    assert tuple(paths) == (*ARTIFACT_FILENAMES, "dashboard.html")
+    assert {path.name for path in paths.values()} == {*ARTIFACT_FILENAMES, "dashboard.html"}
     assert list(pd.read_csv(paths["cleaned_responses.csv"]).columns) == CLEANED_RESPONSE_COLUMNS
     assert list(pd.read_csv(paths["rejected_responses.csv"]).columns) == REJECTED_RESPONSE_COLUMNS
     assert list(pd.read_csv(paths["product_summary.csv"]).columns) == PRODUCT_SUMMARY_ARTIFACT_COLUMNS

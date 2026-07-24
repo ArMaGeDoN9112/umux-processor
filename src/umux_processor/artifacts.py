@@ -11,6 +11,7 @@ mixture; cross-file atomicity is not achievable with independent files.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -20,6 +21,7 @@ import pandas as pd
 
 from umux_processor.aggregation import MONTHLY_COLUMNS, PRODUCT_SUMMARY_COLUMNS
 from umux_processor.pipeline import PipelineResult
+from umux_processor.reporting import write_dashboard, write_dashboard_failure_notice
 
 
 ARTIFACT_FILENAMES = (
@@ -48,7 +50,9 @@ class ArtifactWriteError(RuntimeError):
     """Raised when audit artifacts could not be safely prepared or replaced."""
 
 
-def write_audit_artifacts(result: PipelineResult, output_directory: str | Path) -> dict[str, Path]:
+def write_audit_artifacts(
+    result: PipelineResult, output_directory: str | Path, *, small_sample_threshold: int = 30
+) -> dict[str, Path]:
     """Replace known audit artifacts in ``output_directory`` deterministically.
 
     The directory is created if absent but is never cleared.  Each final file
@@ -91,7 +95,18 @@ def write_audit_artifacts(result: PipelineResult, output_directory: str | Path) 
     except OSError as error:
         _remove_temporary_files(temporary_paths.values())
         raise ArtifactWriteError(f"Could not replace audit artifact: {error}") from error
-    return {filename: directory / filename for filename in ARTIFACT_FILENAMES}
+    paths = {filename: directory / filename for filename in ARTIFACT_FILENAMES}
+    try:
+        paths["dashboard.html"] = write_dashboard(
+            result, directory, small_sample_threshold=small_sample_threshold
+        )
+    except Exception as error:
+        logging.getLogger(__name__).error("Dashboard generation failed; audit artifacts are available: %s", error)
+        try:
+            paths["dashboard.html"] = write_dashboard_failure_notice(directory)
+        except Exception as notice_error:
+            logging.getLogger(__name__).error("Could not write dashboard failure notice: %s", notice_error)
+    return paths
 
 
 def _cleaned_artifact(accepted: pd.DataFrame) -> pd.DataFrame:
