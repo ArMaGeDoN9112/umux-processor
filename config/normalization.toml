@@ -1,0 +1,33 @@
+[products]
+# Keys are normalized input spellings; values are canonical reporting names.
+
+[products.aliases]
+payment = "Payments"
+payments = "Payments"
+"check out" = "Checkout"
+checkout = "Checkout"
+onboarding = "Onboarding"
+onboardng = "Onboarding"
+search = "Search"
+serch = "Search"
+
+[platforms]
+supported = ["Web", "Android", "iOS"]
+
+[user_segments]
+
+[user_segments.aliases]
+new = "New"
+existing = "Existing"
+returning = "Returning"
+
+[countries]
+case = "upper"
+missing_value = "Unknown"
+code_length = 2
+
+[timestamps]
+accepted_format = "%Y-%m-%d %H:%M:%S"
+
+[report]
+small_sample_threshold = 30

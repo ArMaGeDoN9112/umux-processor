@@ -1,0 +1,92 @@
+# Markdown documentation: keep README files only
+*.md
+!README.md
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.hypothesis/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Test, coverage, and profiling artifacts
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+test-results/
+*.prof
+
+# Runtime files
+*.log
+*.pid
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# Input data and generated pipeline artifacts
+*.csv
+*.tsv
+*.xlsx
+*.xls
+input/
+inputs/
+data/
+output/
+outputs/
+artifacts/
+reports/
+*.zip
+
+# Generated visualization files
+dashboard.html
+
+# Docker local overrides and state
+compose.override.yaml
+compose.override.yml
+docker-compose.override.yaml
+docker-compose.override.yml
+.docker/
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating-system files
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

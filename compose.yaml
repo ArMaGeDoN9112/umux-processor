@@ -1,0 +1,24 @@
+services:
+  pipeline:
+    build:
+      context: .
+      target: production
+    volumes:
+      - type: bind
+        source: ${UMUX_INPUT_DIR:-.}
+        target: /input
+        read_only: true
+      - type: bind
+        source: ${UMUX_OUTPUT_DIR:-./output}
+        target: /output
+
+  tests:
+    build:
+      context: .
+      target: test
+
+  api:
+    profiles: [api]
+    build:
+      context: .
+      target: production
