@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from umux_processor.cleaning import clean_records
+from umux_processor.cleaning import clean_records, deduplicate_records
 from umux_processor.config import load_configuration
 
 
@@ -190,3 +190,82 @@ def test_every_input_row_is_classified_once() -> None:
     result = clean_records(input_records, CONFIG)
 
     assert len(result.currently_valid) + len(result.rejected) == len(input_records)
+
+
+def test_deduplicates_equivalent_valid_copies_by_normalized_questionnaire_payload() -> None:
+    cleaned = clean_records(
+        records(
+            [
+                {"response_id": " answer-1 ", "product": " payment ", "platform": " web ", "score1": "3.0"},
+                {"response_id": "answer-1", "product": "Payments", "platform": "Web", "score1": "3"},
+                {"response_id": "answer-1", "product": "Payments", "platform": "Web", "score1": "3"},
+            ]
+        ),
+        CONFIG,
+    )
+
+    result = deduplicate_records(cleaned)
+
+    assert len(result.accepted) == 1
+    assert len(result.rejected) == 2
+    assert result.rejected["rejection_reasons"].tolist() == [("duplicate_exact",), ("duplicate_exact",)]
+    assert result.rejected["duplicate_context"].tolist() == ["duplicate_exact", "duplicate_exact"]
+
+
+def test_keeps_one_valid_copy_and_retains_invalid_copy_reasons_with_context() -> None:
+    cleaned = clean_records(records([{}, {"score1": "bad"}]), CONFIG)
+
+    result = deduplicate_records(cleaned)
+
+    assert len(result.accepted) == 1
+    assert result.rejected.loc[0, "rejection_reasons"] == ("non_integer_score1",)
+    assert result.rejected.loc[0, "duplicate_context"] == "duplicate_with_valid"
+
+
+def test_rejects_all_conflicting_valid_copies_without_selecting_a_winner() -> None:
+    cleaned = clean_records(records([{ "score1": "3" }, {"score1": "5"}]), CONFIG)
+
+    result = deduplicate_records(cleaned)
+
+    assert result.accepted.empty
+    assert result.rejected["rejection_reasons"].tolist() == [
+        ("duplicate_conflict",),
+        ("duplicate_conflict",),
+    ]
+    assert result.rejected["duplicate_context"].tolist() == ["duplicate_conflict", "duplicate_conflict"]
+
+
+def test_keeps_all_invalid_duplicate_copies_with_original_reasons_and_context() -> None:
+    cleaned = clean_records(records([{ "score1": "bad" }, {"score2": "9"}]), CONFIG)
+
+    result = deduplicate_records(cleaned)
+
+    assert result.accepted.empty
+    assert result.rejected["rejection_reasons"].tolist() == [
+        ("non_integer_score1",),
+        ("score2_out_of_range",),
+    ]
+    assert result.rejected["duplicate_context"].tolist() == ["duplicate_all_invalid", "duplicate_all_invalid"]
+
+
+def test_deduplicates_ids_across_files_and_uses_lineage_order_when_dataframe_is_reordered() -> None:
+    input_records = records(
+        [
+            {"source_file": "/input/b.csv", "source_row": 2, "source_input_order": 0},
+            {"source_file": "/input/a.csv", "source_row": 9, "source_input_order": 1},
+        ]
+    )
+    cleaned = clean_records(input_records, CONFIG)
+    reordered = clean_records(input_records.iloc[::-1].reset_index(drop=True), CONFIG)
+
+    result = deduplicate_records(cleaned)
+    reordered_result = deduplicate_records(reordered)
+
+    assert result.accepted[["source_file", "source_row"]].to_dict("records") == [
+        {"source_file": "/input/b.csv", "source_row": 2}
+    ]
+    assert reordered_result.accepted[["source_file", "source_row"]].to_dict("records") == [
+        {"source_file": "/input/b.csv", "source_row": 2}
+    ]
+    assert result.input_count == len(input_records)
+    assert len(result.accepted) + len(result.rejected) == len(input_records)

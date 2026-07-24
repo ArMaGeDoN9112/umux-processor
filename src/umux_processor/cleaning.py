@@ -18,6 +18,18 @@ from umux_processor.ingestion import LINEAGE_COLUMNS
 
 
 REASON_COLUMNS = "rejection_reasons"
+DUPLICATE_CONTEXT_COLUMN = "duplicate_context"
+
+QUESTIONNAIRE_PAYLOAD_COLUMNS = (
+    "submitted_at",
+    "product",
+    "product_version",
+    "platform",
+    "country",
+    "user_segment",
+    "score1",
+    "score2",
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +43,27 @@ class CleaningResult:
     def input_count(self) -> int:
         """The number of input records classified by this cleaning run."""
         return len(self.currently_valid) + len(self.rejected)
+
+
+@dataclass(frozen=True)
+class DeduplicationResult:
+    """Final cleaning disposition after deterministic duplicate resolution.
+
+    ``duplicate_context`` is audit metadata, distinct from validation reasons.
+    Invalid rows retain their original ``rejection_reasons`` and receive one of
+    ``duplicate_with_valid``, ``duplicate_conflict``, or
+    ``duplicate_all_invalid`` when another row shares their normalized ID.
+    Valid copies rejected by deduplication instead receive the corresponding
+    ``duplicate_exact`` or ``duplicate_conflict`` rejection reason.
+    """
+
+    accepted: pd.DataFrame
+    rejected: pd.DataFrame
+
+    @property
+    def input_count(self) -> int:
+        """The number of rows accounted for after deduplication."""
+        return len(self.accepted) + len(self.rejected)
 
 
 def clean_records(records: pd.DataFrame, config: NormalizationConfig) -> CleaningResult:
@@ -66,6 +99,85 @@ def clean_records(records: pd.DataFrame, config: NormalizationConfig) -> Cleanin
         currently_valid=normalized.loc[valid_mask].drop(columns=REASON_COLUMNS).reset_index(drop=True),
         rejected=normalized.loc[~valid_mask].reset_index(drop=True),
     )
+
+
+def deduplicate_records(cleaned: CleaningResult) -> DeduplicationResult:
+    """Resolve duplicate normalized response IDs without changing row validity.
+
+    A group is ordered by input argument order (when ingestion supplied
+    ``source_input_order``), then ``source_file`` and ``source_row``.  For
+    callers providing only the documented file/row lineage, file and row order
+    remains deterministic even if dataframe rows are shuffled.
+    """
+    valid = cleaned.currently_valid.copy(deep=True)
+    invalid = cleaned.rejected.copy(deep=True)
+    valid[DUPLICATE_CONTEXT_COLUMN] = pd.NA
+    invalid[DUPLICATE_CONTEXT_COLUMN] = pd.NA
+
+    accepted_parts: list[pd.DataFrame] = []
+    rejected_parts: list[pd.DataFrame] = []
+    valid_by_id = _records_by_response_id(valid)
+    invalid_by_id = _records_by_response_id(invalid)
+
+    response_ids = sorted(set(valid_by_id) | set(invalid_by_id))
+    for response_id in response_ids:
+        valid_group = valid_by_id.get(response_id, valid.iloc[0:0])
+        invalid_group = invalid_by_id.get(response_id, invalid.iloc[0:0])
+        if valid_group.empty:
+            invalid_group = invalid_group.copy()
+            invalid_group[DUPLICATE_CONTEXT_COLUMN] = "duplicate_all_invalid"
+            rejected_parts.append(invalid_group)
+            continue
+
+        payload_count = len(_payload_keys(valid_group))
+        if payload_count == 1:
+            ordered_valid = _sort_by_lineage(valid_group)
+            accepted_parts.append(ordered_valid.iloc[[0]])
+            duplicate_valid = ordered_valid.iloc[1:].copy()
+            if not duplicate_valid.empty:
+                duplicate_valid[REASON_COLUMNS] = [("duplicate_exact",)] * len(duplicate_valid)
+                duplicate_valid[DUPLICATE_CONTEXT_COLUMN] = "duplicate_exact"
+                rejected_parts.append(duplicate_valid)
+            invalid_context = "duplicate_with_valid"
+        else:
+            conflicted_valid = valid_group.copy()
+            conflicted_valid[REASON_COLUMNS] = [("duplicate_conflict",)] * len(conflicted_valid)
+            conflicted_valid[DUPLICATE_CONTEXT_COLUMN] = "duplicate_conflict"
+            rejected_parts.append(conflicted_valid)
+            invalid_context = "duplicate_conflict"
+
+        if not invalid_group.empty:
+            invalid_group = invalid_group.copy()
+            invalid_group[DUPLICATE_CONTEXT_COLUMN] = invalid_context
+            rejected_parts.append(invalid_group)
+
+    missing_id_invalid = invalid.loc[invalid["response_id"].isna()]
+    if not missing_id_invalid.empty:
+        rejected_parts.append(missing_id_invalid)
+
+    accepted = _combine_and_sort(accepted_parts, valid)
+    rejected = _combine_and_sort(rejected_parts, invalid)
+    return DeduplicationResult(accepted=accepted, rejected=rejected)
+
+
+def _records_by_response_id(records: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    identified = records.loc[records["response_id"].notna()]
+    return {str(response_id): group.copy() for response_id, group in identified.groupby("response_id", sort=False)}
+
+
+def _payload_keys(records: pd.DataFrame) -> set[tuple[object, ...]]:
+    return {tuple(row) for row in records.loc[:, QUESTIONNAIRE_PAYLOAD_COLUMNS].itertuples(index=False, name=None)}
+
+
+def _sort_by_lineage(records: pd.DataFrame) -> pd.DataFrame:
+    columns = [column for column in ("source_input_order", "source_file", "source_row") if column in records]
+    return records.sort_values(columns, kind="stable") if columns else records.copy()
+
+
+def _combine_and_sort(parts: list[pd.DataFrame], template: pd.DataFrame) -> pd.DataFrame:
+    if not parts:
+        return template.iloc[0:0].copy().reset_index(drop=True)
+    return _sort_by_lineage(pd.concat(parts, ignore_index=True, sort=False)).reset_index(drop=True)
 
 
 def _clean_row(

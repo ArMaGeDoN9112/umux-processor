@@ -41,6 +41,7 @@ def test_combines_multiple_explicit_files_in_argument_order(tmp_path: Path) -> N
     result = ingest_csv_inputs([second, first])
 
     assert result.records["response_id"].tolist() == ["second", "first"]
+    assert result.records["source_input_order"].tolist() == [0, 1]
 
 
 def test_expands_globs_in_sorted_order_and_removes_duplicate_matches(tmp_path: Path) -> None:

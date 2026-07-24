@@ -25,7 +25,7 @@ REQUIRED_COLUMNS = (
     "score1",
     "score2",
 )
-LINEAGE_COLUMNS = ("source_file", "source_row")
+LINEAGE_COLUMNS = ("source_file", "source_row", "source_input_order")
 GENERATED_OUTPUT_FILENAMES = frozenset(
     {
         "cleaned_responses.csv",
@@ -65,7 +65,7 @@ def ingest_csv_inputs(inputs: Sequence[str | Path]) -> IngestionResult:
     """
 
     input_files = _resolve_input_files(inputs)
-    frames = [_read_csv_file(path) for path in input_files]
+    frames = [_read_csv_file(path, source_input_order) for source_input_order, path in enumerate(input_files)]
     records = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
     return IngestionResult(records=records, input_files=input_files)
 
@@ -98,7 +98,7 @@ def _resolve_input(pattern: str) -> list[Path]:
     return files
 
 
-def _read_csv_file(path: Path) -> pd.DataFrame:
+def _read_csv_file(path: Path, source_input_order: int) -> pd.DataFrame:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as source:
             reader = csv.reader(source, strict=True)
@@ -120,6 +120,7 @@ def _read_csv_file(path: Path) -> pd.DataFrame:
     frame = _preserve_reserved_extra_columns(frame)
     frame["source_file"] = str(path)
     frame["source_row"] = pd.Series(source_rows, dtype="int64")
+    frame["source_input_order"] = pd.Series([source_input_order] * len(frame), dtype="int64")
     return frame
 
 
