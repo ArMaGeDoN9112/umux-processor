@@ -82,11 +82,14 @@ def clean_records(records: pd.DataFrame, config: NormalizationConfig) -> Cleanin
     product_aliases = _normalized_aliases(config.product_aliases)
     platform_aliases = {platform.casefold(): platform for platform in config.supported_platforms}
     segment_aliases = _normalized_aliases(config.user_segment_aliases)
+    latest_submitted_at = datetime.now()
 
     reasons_by_row: list[tuple[str, ...]] = []
     transformed: list[dict[str, object]] = []
     for _, row in normalized.iterrows():
-        values, reasons = _clean_row(row, config, product_aliases, platform_aliases, segment_aliases)
+        values, reasons = _clean_row(
+            row, config, product_aliases, platform_aliases, segment_aliases, latest_submitted_at
+        )
         transformed.append(values)
         reasons_by_row.append(tuple(reasons))
 
@@ -186,6 +189,7 @@ def _clean_row(
     product_aliases: dict[str, str],
     platform_aliases: dict[str, str],
     segment_aliases: dict[str, str],
+    latest_submitted_at: datetime,
 ) -> tuple[dict[str, object], list[str]]:
     reasons: list[str] = []
     response_id = _string_or_none(row["response_id"])
@@ -195,6 +199,8 @@ def _clean_row(
     submitted_at = _parse_timestamp(row["submitted_at"], config.timestamp_format)
     if submitted_at is None:
         reasons.append("invalid_submitted_at")
+    elif submitted_at > latest_submitted_at:
+        reasons.append("submitted_at_in_future")
 
     product_input = _string_or_none(row["product"])
     if product_input is None:

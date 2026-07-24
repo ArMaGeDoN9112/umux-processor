@@ -45,7 +45,7 @@ def write_dashboard_failure_notice(output_directory: str | Path) -> Path:
     temporary = Path(filename)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
-            handle.write("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Dashboard unavailable</title><body><h1>Dashboard unavailable</h1><p>Dashboard generation failed. The CSV and JSON audit artifacts were generated successfully; consult the pipeline logs for details.</p></body></html>")
+            handle.write("<!doctype html><html lang=\"ru\"><meta charset=\"utf-8\"><title>Панель недоступна</title><body><h1>Панель недоступна</h1><p>Не удалось сформировать HTML-панель. CSV- и JSON-артефакты аудита созданы успешно; подробности приведены в журналах конвейера.</p></body></html>")
         os.replace(temporary, target)
     except Exception:
         temporary.unlink(missing_ok=True)
@@ -59,30 +59,29 @@ def _dashboard_html(result: PipelineResult, threshold: int) -> str:
     accepted = int(overall.get("accepted_row_count", 0))
     rejection_rate = float(overall.get("rejection_rate", 0.0))
     overall_mean = _overall_mean(result.product_summary)
+    comparison = _comparison_summary(result.monthly_aggregates)
     current = _current_combinations(result.monthly_aggregates)
-    small_samples = _small_samples(result.monthly_aggregates, threshold)
 
     charts = [
         _trend_chart(result.monthly_aggregates),
-        _bar_chart(result.quality.by_rejection_reason, "rejection_reason", "rejected_row_count", "Rejection reasons"),
-        _bar_chart(result.quality.by_product, "product", "rejection_rate", "Rejection rate by product", percent=True),
+        _bar_chart(result.quality.by_rejection_reason, "rejection_reason", "rejected_row_count", "Причины отклонения"),
+        _bar_chart(result.quality.by_product, "product", "rejection_rate", "Доля отклонений по продуктам", percent=True),
     ]
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UMUX-Lite dashboard</title><style>{_STYLE}</style>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Панель UMUX-Lite</title><style>{_STYLE}</style>
 <script>{get_plotlyjs()}</script></head><body>
-<main><h1>UMUX-Lite dashboard</h1><p class="lede">A standalone summary of the tested pipeline aggregates. Rankings show relative performance; no universal “good UMUX” threshold is assumed.</p>
-<section class="cards" aria-label="Key performance indicators">
-{_card("Raw responses", str(raw))}{_card("Accepted responses", str(accepted))}{_card("Rejection rate", _percent(rejection_rate))}{_card("Overall mean UMUX", _number(overall_mean))}
+<main><h1>Панель UMUX-Lite</h1><p class="lede">Самодостаточная сводка по агрегатам обработанных данных. Рейтинги показывают относительные результаты; универсального порога «хорошего UMUX» не предполагается.</p>
+<section class="cards" aria-label="Ключевые показатели">
+{_card("Исходные ответы", str(raw))}{_card("Принятые ответы", str(accepted))}{_card("Доля отклонений", _percent(rejection_rate))}{_card("Средний UMUX", _number(overall_mean))}
 </section>
-<section><h2>Product and version comparison</h2>{_comparison_table(current)}</section>
-<section><h2>Monthly UMUX trends</h2><p>Every marker label is its accepted response count. Gaps represent calendar months with no accepted response for that product/version; they are not treated as a change.</p>{charts[0]}</section>
-<section><h2>Lowest-performing latest combinations</h2>{_insight_table(current.sort_values(["latest_mean_umux", "product", "product_version"], kind="stable") if not current.empty else current, ["product", "product_version", "latest_month", "latest_mean_umux", "total_valid_responses"], ["Product", "Version", "Latest month", "Latest UMUX", "Responses"])}</section>
-<section><h2>Largest negative calendar-month changes</h2>{_negative_changes(result.monthly_aggregates)}</section>
-<section><h2>Rejection reasons</h2>{charts[1]}{_insight_table(result.quality.by_rejection_reason, ["rejection_reason", "rejected_row_count"], ["Reason", "Rejected rows"])}</section>
-<section><h2>Data quality</h2>{charts[2]}{_insight_table(result.quality.by_product, ["product", "raw_row_count", "accepted_row_count", "rejected_row_count", "rejection_rate"], ["Product", "Raw", "Accepted", "Rejected", "Rejection rate"], percent_columns={"rejection_rate"})}</section>
-{_small_sample_notice(small_samples, threshold)}
-<section><h2>How to read these metrics</h2><p>UMUX-Lite is calculated for accepted questionnaires only: <code>((score1 − 1) + (score2 − 1)) / 8 × 100</code>. The overall mean is the response-count-weighted combination of the provided product summaries. Rejection rate is rejected raw rows divided by all ingested raw rows, including excluded duplicate copies.</p></section>
+<section><h2>Сравнение продуктов и версий</h2>{_comparison_table(comparison)}</section>
+<section><h2>Тренды UMUX по месяцам</h2><p>Подпись каждой точки показывает число принятых ответов. Пропуски означают календарные месяцы без принятых ответов для этой пары продукта и версии и не считаются изменением.</p>{charts[0]}</section>
+<section><h2>Комбинации с наименьшим последним UMUX</h2>{_insight_table(current.sort_values(["latest_mean_umux", "product", "product_version"], kind="stable") if not current.empty else current, ["product", "product_version", "latest_month", "latest_mean_umux", "total_valid_responses"], ["Продукт", "Версия", "Последний месяц", "Последний UMUX", "Ответы"])}</section>
+<section><h2>Наибольшие отрицательные изменения по месяцам</h2>{_negative_changes(result.monthly_aggregates)}</section>
+<section><h2>Причины отклонения</h2>{charts[1]}{_insight_table(result.quality.by_rejection_reason, ["rejection_reason", "rejected_row_count"], ["Причина", "Отклонено строк"])}</section>
+<section><h2>Качество данных</h2>{charts[2]}{_insight_table(result.quality.by_product, ["product", "raw_row_count", "accepted_row_count", "rejected_row_count", "rejection_rate"], ["Продукт", "Исходные", "Принятые", "Отклонённые", "Доля отклонений"], percent_columns={"rejection_rate"})}</section>
+    <section><h2>Как читать эти показатели</h2><p>UMUX-Lite рассчитывается только по принятым анкетам: <code>((score1 − 1) + (score2 − 1)) / 8 × 100</code>. Общее среднее — это взвешенное по количеству ответов объединение предоставленных итогов по продуктам. Доля отклонений — отношение отклонённых исходных строк ко всем загруженным исходным строкам, включая исключённые дубликаты.</p></section>
 </main></body></html>"""
 
 
@@ -108,33 +107,47 @@ def _current_combinations(monthly: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _small_samples(monthly: pd.DataFrame, threshold: int) -> pd.DataFrame:
-    required = {"month", "product", "product_version", "valid_responses"}
+def _comparison_summary(monthly: pd.DataFrame) -> pd.DataFrame:
+    required = {"product", "product_version", "valid_responses", "mean_umux"}
     if monthly.empty or not required.issubset(monthly.columns):
-        return pd.DataFrame(columns=["month", "product", "product_version", "valid_responses"])
-    return monthly.loc[monthly["valid_responses"] < threshold, ["month", "product", "product_version", "valid_responses"]].sort_values(["month", "product", "product_version"], kind="stable")
+        return pd.DataFrame(columns=["product", "product_version", "total_valid_responses", "overall_mean_umux"])
+    rows: list[dict[str, object]] = []
+    for (product, version), group in monthly.groupby(["product", "product_version"], sort=True, dropna=False):
+        counts = pd.to_numeric(group["valid_responses"], errors="coerce").fillna(0)
+        means = pd.to_numeric(group["mean_umux"], errors="coerce")
+        total = counts.sum()
+        if total:
+            rows.append(
+                {
+                    "product": product,
+                    "product_version": version,
+                    "total_valid_responses": int(total),
+                    "overall_mean_umux": float((counts * means).sum() / total),
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def _trend_chart(monthly: pd.DataFrame) -> str:
     required = {"month", "product", "product_version", "valid_responses", "mean_umux"}
     if monthly.empty or not required.issubset(monthly.columns):
-        return '<p class="empty">No monthly trend data is available.</p>'
+        return '<p class="empty">Данные о трендах по месяцам отсутствуют.</p>'
     figure = go.Figure()
     for (product, version), group in monthly.groupby(["product", "product_version"], sort=True, dropna=False):
         by_month = group.sort_values("month", kind="stable").set_index(pd.to_datetime(group.sort_values("month", kind="stable")["month"]))
         calendar = pd.date_range(by_month.index.min(), by_month.index.max(), freq="MS")
         values = by_month.reindex(calendar)
-        figure.add_trace(go.Scatter(x=calendar, y=values["mean_umux"], mode="lines+markers+text", name=f"{product} {version}", text=[f"n={int(v)}" if pd.notna(v) else "" for v in values["valid_responses"]], textposition="top center", hovertemplate="%{x|%b %Y}<br>UMUX: %{y:.1f}<br>%{text}<extra></extra>", connectgaps=False))
-    figure.update_layout(yaxis=dict(title="Mean UMUX", range=[0, 100]), xaxis_title="Calendar month", legend_title="Product / version", margin=dict(l=45, r=20, t=30, b=45))
+        figure.add_trace(go.Scatter(x=calendar, y=values["mean_umux"], mode="lines+markers+text", name=f"{product} {version}", text=[f"Ответов: {int(v)}" if pd.notna(v) else "" for v in values["valid_responses"]], textposition="top center", hovertemplate="%{x|%m.%Y}<br>UMUX: %{y:.1f}<br>%{text}<extra></extra>", connectgaps=False))
+    figure.update_layout(yaxis=dict(title="Средний UMUX", range=[0, 100]), xaxis=dict(title="Календарный месяц", tickformat="%m.%Y"), legend_title="Продукт / версия", margin=dict(l=45, r=20, t=30, b=45))
     return _figure_html(figure, "monthly-trends")
 
 
 def _bar_chart(data: pd.DataFrame, label: str, value: str, title: str, *, percent: bool = False) -> str:
     if data.empty or label not in data or value not in data:
-        return '<p class="empty">No data is available.</p>'
+        return '<p class="empty">Данные отсутствуют.</p>'
     values = pd.to_numeric(data[value], errors="coerce").fillna(0)
     figure = go.Figure(go.Bar(x=data[label].astype(str), y=values, text=[_percent(v) if percent else str(int(v)) for v in values], textposition="auto"))
-    figure.update_layout(title=title, yaxis_title="Rate" if percent else "Rows", margin=dict(l=45, r=20, t=45, b=75))
+    figure.update_layout(title=title, yaxis_title="Доля" if percent else "Строки", margin=dict(l=45, r=20, t=45, b=75))
     return _figure_html(figure, title.lower().replace(" ", "-"))
 
 
@@ -144,32 +157,25 @@ def _figure_html(figure: go.Figure, identifier: str) -> str:
     return f'<div id="{safe_id}" class="chart"></div><script>Plotly.newPlot("{safe_id}", {payload}, {{responsive:true}});</script>'
 
 
-def _comparison_table(current: pd.DataFrame) -> str:
-    if current.empty:
-        return '<p class="empty">No accepted responses are available for product/version comparison.</p>'
-    return _insight_table(current.sort_values(["product", "product_version"], kind="stable"), ["product", "product_version", "total_valid_responses", "latest_month", "latest_mean_umux"], ["Product", "Version", "Responses", "Latest month", "Latest UMUX"])
+def _comparison_table(comparison: pd.DataFrame) -> str:
+    if comparison.empty:
+        return '<p class="empty">Нет принятых ответов для сравнения продуктов и версий.</p>'
+    return _insight_table(comparison.sort_values(["product", "product_version"], kind="stable"), ["product", "product_version", "total_valid_responses", "overall_mean_umux"], ["Продукт", "Версия", "Ответы", "СРЕДНИЙ UMUX"])
 
 
 def _negative_changes(monthly: pd.DataFrame) -> str:
     required = {"month", "product", "product_version", "month_over_month_delta", "valid_responses"}
     if monthly.empty or not required.issubset(monthly.columns):
-        return '<p class="empty">No calendar-month changes are available.</p>'
+        return '<p class="empty">Нет данных об изменениях по календарным месяцам.</p>'
     negative = monthly.loc[pd.to_numeric(monthly["month_over_month_delta"], errors="coerce") < 0].copy()
     if negative.empty:
-        return '<p class="empty">No negative calendar-month changes are available.</p>'
-    return _insight_table(negative.sort_values("month_over_month_delta", kind="stable").head(10), ["product", "product_version", "month", "month_over_month_delta", "valid_responses"], ["Product", "Version", "Month", "Change", "Responses"])
-
-
-def _small_sample_notice(samples: pd.DataFrame, threshold: int) -> str:
-    if samples.empty:
-        return f'<section class="notice"><h2>Small-sample notice</h2><p>No product/version/month groups are below the configured threshold of {threshold} responses.</p></section>'
-    items = "".join(f"<li>{html.escape(_display(row.product))} {html.escape(_display(row.product_version))}, {html.escape(_month(row.month))}: n={int(row.valid_responses)}</li>" for row in samples.itertuples(index=False))
-    return f'<section class="notice"><h2>Small-sample notice</h2><p>The following product/version/month groups are below the configured threshold of {threshold} responses; treat rankings and changes as directional.</p><ul>{items}</ul></section>'
+        return '<p class="empty">Отрицательных изменений по календарным месяцам нет.</p>'
+    return _insight_table(negative.sort_values("month_over_month_delta", kind="stable").head(10), ["product", "product_version", "month", "month_over_month_delta", "valid_responses"], ["Продукт", "Версия", "Месяц", "Изменение", "Ответы"])
 
 
 def _insight_table(data: pd.DataFrame, columns: list[str], headings: list[str], *, percent_columns: set[str] | None = None) -> str:
     if data.empty:
-        return '<p class="empty">No data is available.</p>'
+        return '<p class="empty">Данные отсутствуют.</p>'
     percent_columns = percent_columns or set()
     header = "".join(f"<th>{html.escape(title)}</th>" for title in headings)
     body = "".join("<tr>" + "".join(f"<td>{html.escape(_format(column, row.get(column), column in percent_columns))}</td>" for column in columns) + "</tr>" for _, row in data.iterrows())
@@ -183,7 +189,7 @@ def _format(column: str, value: object, percent: bool = False) -> str:
         return _percent(float(value))
     if column in {"month", "latest_month"}:
         return _month(value)
-    if column in {"mean_umux", "latest_mean_umux", "month_over_month_delta"}:
+    if column in {"mean_umux", "latest_mean_umux", "overall_mean_umux", "month_over_month_delta"}:
         return _number(float(value))
     if column.endswith("responses") or column.endswith("row_count"):
         return str(int(value))
@@ -203,7 +209,9 @@ def _percent(value: float) -> str:
 
 
 def _month(value: object) -> str:
-    return pd.Timestamp(value).strftime("%b %Y")
+    timestamp = pd.Timestamp(value)
+    months = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря")
+    return f"{months[timestamp.month - 1]} {timestamp.year}"
 
 
 def _display(value: object) -> str:
@@ -211,5 +219,5 @@ def _display(value: object) -> str:
 
 
 _STYLE = """
-body{margin:0;background:#f5f7fb;color:#172033;font:16px system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}main{max-width:1200px;margin:auto;padding:28px}h1{margin-bottom:0}.lede{color:#4d5b73}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:24px 0}.card,section{background:#fff;border:1px solid #dfe5ef;border-radius:10px;padding:18px;margin:20px 0;box-shadow:0 1px 2px #1720330d}.card h2{font-size:.9rem;margin:0;color:#4d5b73}.card p{font-size:2rem;font-weight:700;margin:8px 0 0}.chart{min-height:380px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e4e8f0}th{background:#f8faff}.notice{border-left:5px solid #e59b24}.empty{color:#4d5b73;font-style:italic}code{background:#f1f3f7;padding:2px 4px;border-radius:3px}@media(max-width:600px){main{padding:16px}.chart{min-height:320px}}
+body{margin:0;background:#f5f7fb;color:#172033;font:16px system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}main{max-width:1200px;margin:auto;padding:28px}h1{margin-bottom:0}.lede{color:#4d5b73}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:24px 0}.card,section{background:#fff;border:1px solid #dfe5ef;border-radius:10px;padding:18px;margin:20px 0;box-shadow:0 1px 2px #1720330d}.card h2{font-size:.9rem;margin:0;color:#4d5b73}.card p{font-size:2rem;font-weight:700;margin:8px 0 0}.chart{min-height:380px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e4e8f0}th{background:#f8faff}.empty{color:#4d5b73;font-style:italic}code{background:#f1f3f7;padding:2px 4px;border-radius:3px}@media(max-width:600px){main{padding:16px}.chart{min-height:320px}}
 """

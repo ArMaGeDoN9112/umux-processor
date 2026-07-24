@@ -35,28 +35,52 @@ def test_dashboard_contains_sections_embedded_assets_and_provided_values(tmp_pat
     html = path.read_text(encoding="utf-8")
 
     for heading in [
-        "UMUX-Lite dashboard", "Product and version comparison", "Monthly UMUX trends",
-        "Lowest-performing latest combinations", "Largest negative calendar-month changes",
-        "Rejection reasons", "Data quality", "How to read these metrics",
+        "Панель UMUX-Lite", "Сравнение продуктов и версий", "Тренды UMUX по месяцам",
+        "Комбинации с наименьшим последним UMUX", "Наибольшие отрицательные изменения по месяцам",
+        "Причины отклонения", "Качество данных", "Как читать эти показатели",
     ]:
         assert heading in html
-    assert "Raw responses" in html
+    assert "Исходные ответы" in html
     assert ">10<" in html
-    assert "Overall mean UMUX</h2><p>62.5</p>" in html
+    assert "Средний UMUX</h2><p>62.5</p>" in html
     assert "Plotly.newPlot" in html
     assert '<script src="https://cdn.plot.ly' not in html
-    assert "Rejection rate</h2><p>40.0%</p>" in html
+    assert "Доля отклонений</h2><p>40.0%</p>" in html
 
 
-def test_dashboard_escapes_hostile_labels_and_warns_about_small_samples(tmp_path: Path) -> None:
+def test_product_version_comparison_uses_all_time_weighted_mean_without_latest_month(tmp_path: Path) -> None:
+    html = write_dashboard(_result(), tmp_path, small_sample_threshold=5).read_text(encoding="utf-8")
+    comparison = html.split('<section><h2>Сравнение продуктов и версий</h2>', maxsplit=1)[1].split(
+        "</section>", maxsplit=1
+    )[0]
+
+    assert "<th>Последний месяц</th>" not in comparison
+    assert "<th>СРЕДНИЙ UMUX</th>" in comparison
+    assert ">66.7<" in comparison
+    assert ">50.0<" not in comparison
+
+
+def test_dashboard_localizes_all_interface_text_to_russian(tmp_path: Path) -> None:
+    html = write_dashboard(_result(), tmp_path, small_sample_threshold=5).read_text(encoding="utf-8")
+
+    for text in [
+        'lang="ru"', "Панель UMUX-Lite", "Продукт", "Версия", "Ответы",
+        "Последний месяц", "СРЕДНИЙ UMUX", "Тренды UMUX по месяцам",
+        "Причины отклонения", "Качество данных", "Средний UMUX",
+    ]:
+        assert text in html
+    assert "Product and version comparison" not in html
+    assert "Latest month" not in html
+
+
+def test_dashboard_escapes_hostile_labels_without_small_sample_notice(tmp_path: Path) -> None:
     hostile = '<img src=x onerror="alert(1)">'
     html = write_dashboard(_result(hostile), tmp_path, small_sample_threshold=30).read_text(encoding="utf-8")
 
     assert hostile not in html
     assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in html
     assert "\\u003cimg" in html
-    assert "Small-sample notice" in html
-    assert "below the configured threshold of 30" in html
+    assert "Предупреждение о малой выборке" not in html
 
 
 def test_dashboard_handles_empty_aggregates(tmp_path: Path) -> None:
@@ -68,8 +92,8 @@ def test_dashboard_handles_empty_aggregates(tmp_path: Path) -> None:
 
     html = write_dashboard(empty, tmp_path, small_sample_threshold=30).read_text(encoding="utf-8")
 
-    assert "No accepted responses are available" in html
-    assert "No monthly trend data is available" in html
+    assert "Нет принятых ответов" in html
+    assert "Данные о трендах по месяцам отсутствуют" in html
 
 
 def test_dashboard_failure_does_not_prevent_machine_readable_artifacts(
@@ -84,5 +108,5 @@ def test_dashboard_failure_does_not_prevent_machine_readable_artifacts(
 
     assert (tmp_path / "quality_summary.json").exists()
     assert paths["dashboard.html"].exists()
-    assert "Dashboard unavailable" in paths["dashboard.html"].read_text(encoding="utf-8")
+    assert "Панель недоступна" in paths["dashboard.html"].read_text(encoding="utf-8")
     assert "Dashboard generation failed" in caplog.text
