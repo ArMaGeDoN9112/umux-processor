@@ -17,6 +17,23 @@ from plotly.offline.offline import get_plotlyjs
 from umux_processor.pipeline import PipelineResult
 
 
+REJECTION_REASON_LABELS = {
+    "missing_response_id": "Отсутствует идентификатор ответа",
+    "invalid_submitted_at": "Некорректная дата или время ответа",
+    "missing_product": "Не указан продукт",
+    "unknown_product": "Неизвестный продукт",
+    "missing_product_version": "Не указана версия продукта",
+    "missing_score1": "Не указан ответ на вопрос 1",
+    "missing_score2": "Не указан ответ на вопрос 2",
+    "non_integer_score1": "Ответ на вопрос 1 не является целым числом",
+    "non_integer_score2": "Ответ на вопрос 2 не является целым числом",
+    "score1_out_of_range": "Ответ на вопрос 1 вне диапазона 1–5",
+    "score2_out_of_range": "Ответ на вопрос 2 вне диапазона 1–5",
+    "duplicate_exact": "Полный дубликат ответа",
+    "duplicate_conflict": "Конфликтующие дубликаты ответа",
+}
+
+
 def write_dashboard(
     result: PipelineResult, output_directory: str | Path, *, small_sample_threshold: int
 ) -> Path:
@@ -60,10 +77,11 @@ def _dashboard_html(result: PipelineResult, threshold: int) -> str:
     rejection_rate = float(overall.get("rejection_rate", 0.0))
     overall_mean = _overall_mean(result.product_summary)
     comparison = _comparison_summary(result.monthly_aggregates)
+    rejection_reasons = _localized_rejection_reasons(result.quality.by_rejection_reason)
 
     charts = [
         _trend_chart(result.monthly_aggregates),
-        _bar_chart(result.quality.by_rejection_reason, "rejection_reason", "rejected_row_count", "Причины отклонения"),
+        _bar_chart(rejection_reasons, "rejection_reason", "rejected_row_count", "Причины отклонения"),
         _bar_chart(result.quality.by_product, "product", "rejection_rate", "Доля отклонений по продуктам", percent=True),
     ]
     return f"""<!doctype html>
@@ -78,7 +96,7 @@ def _dashboard_html(result: PipelineResult, threshold: int) -> str:
 <section><h2>Сравнение продуктов и версий</h2>{_comparison_table(comparison)}</section>
 <section><h2>Тренды UMUX по месяцам</h2><p>Подпись каждой точки показывает число принятых ответов. Пропуски означают календарные месяцы без принятых ответов для этой пары продукта и версии и не считаются изменением.</p>{charts[0]}</section>
 <section><h2>Наибольшие отрицательные изменения по месяцам</h2>{_negative_changes(result.monthly_aggregates)}</section>
-<section><h2>Причины отклонения</h2>{charts[1]}{_insight_table(result.quality.by_rejection_reason, ["rejection_reason", "rejected_row_count"], ["Причина", "Отклонено строк"])}</section>
+<section><h2>Причины отклонения</h2>{charts[1]}{_insight_table(rejection_reasons, ["rejection_reason", "rejected_row_count"], ["Причина", "Отклонено строк"])}</section>
 <section><h2>Качество данных</h2>{charts[2]}{_insight_table(result.quality.by_product, ["product", "raw_row_count", "accepted_row_count", "rejected_row_count", "rejection_rate"], ["Продукт", "Исходные", "Принятые", "Отклонённые", "Доля отклонений"], percent_columns={"rejection_rate"})}</section>
 </main></body></html>"""
 
@@ -91,6 +109,18 @@ def _overall_mean(product_summary: pd.DataFrame) -> float | None:
     means = pd.to_numeric(product_summary["overall_mean_umux"], errors="coerce")
     total = counts.sum()
     return float((counts * means).sum() / total) if total else None
+
+
+def _localized_rejection_reasons(reasons: pd.DataFrame) -> pd.DataFrame:
+    """Return dashboard-only Russian labels while preserving audit reason codes."""
+    localized = reasons.copy()
+    if "rejection_reason" in localized:
+        localized["rejection_reason"] = localized["rejection_reason"].map(
+            lambda reason: REJECTION_REASON_LABELS.get(
+                str(reason), f"Неизвестная причина: {reason}"
+            )
+        )
+    return localized
 
 
 def _interactive_response_list(accepted: pd.DataFrame) -> str:

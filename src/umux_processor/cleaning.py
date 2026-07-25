@@ -200,7 +200,7 @@ def _clean_row(
     if submitted_at is None:
         reasons.append("invalid_submitted_at")
     elif submitted_at > latest_submitted_at:
-        reasons.append("submitted_at_in_future")
+        reasons.append("invalid_submitted_at")
 
     product_input = _string_or_none(row["product"])
     if product_input is None:

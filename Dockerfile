@@ -15,7 +15,11 @@ RUN pip install --prefix=/install .
 
 FROM dependencies AS test-dependencies
 
-RUN pip install --prefix=/test-install "pytest>=8.0"
+RUN pip install --prefix=/test-install ".[test,api]"
+
+FROM dependencies AS api-dependencies
+
+RUN pip install --prefix=/api-install ".[api]"
 
 FROM base AS production
 
@@ -28,6 +32,12 @@ RUN groupadd --system app && useradd --system --gid app --create-home app \
 USER app
 
 ENTRYPOINT ["umux-process"]
+
+FROM production AS api
+
+COPY --from=api-dependencies /api-install /usr/local
+ENTRYPOINT ["uvicorn"]
+CMD ["umux_processor.api:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM production AS test
 

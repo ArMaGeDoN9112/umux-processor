@@ -74,6 +74,46 @@ def test_dashboard_localizes_all_interface_text_to_russian(tmp_path: Path) -> No
     assert "Latest month" not in html
 
 
+def test_dashboard_displays_rejection_reasons_in_russian(tmp_path: Path) -> None:
+    result = _result()
+    reasons = {
+        "missing_response_id": "Отсутствует идентификатор ответа",
+        "invalid_submitted_at": "Некорректная дата или время ответа",
+        "missing_product": "Не указан продукт",
+        "unknown_product": "Неизвестный продукт",
+        "missing_product_version": "Не указана версия продукта",
+        "missing_score1": "Не указан ответ на вопрос 1",
+        "missing_score2": "Не указан ответ на вопрос 2",
+        "non_integer_score1": "Ответ на вопрос 1 не является целым числом",
+        "non_integer_score2": "Ответ на вопрос 2 не является целым числом",
+        "score1_out_of_range": "Ответ на вопрос 1 вне диапазона 1–5",
+        "score2_out_of_range": "Ответ на вопрос 2 вне диапазона 1–5",
+        "duplicate_exact": "Полный дубликат ответа",
+        "duplicate_conflict": "Конфликтующие дубликаты ответа",
+    }
+    quality = DataQualitySummaries(
+        overall=result.quality.overall,
+        by_rejection_reason=pd.DataFrame(
+            [{"rejection_reason": code, "rejected_row_count": 1} for code in reasons]
+        ),
+        by_product=result.quality.by_product,
+        by_source=result.quality.by_source,
+    )
+    localized_result = PipelineResult(
+        accepted=result.accepted,
+        rejected=result.rejected,
+        monthly_aggregates=result.monthly_aggregates,
+        product_summary=result.product_summary,
+        quality=quality,
+    )
+
+    html = write_dashboard(localized_result, tmp_path, small_sample_threshold=5).read_text(encoding="utf-8")
+
+    for code, label in reasons.items():
+        assert label in html
+        assert code not in html
+
+
 def test_dashboard_embeds_interactive_filters_and_accepted_response_dimensions(tmp_path: Path) -> None:
     result = _result()
     result = PipelineResult(

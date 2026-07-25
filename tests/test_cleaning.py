@@ -95,11 +95,11 @@ def test_rejects_missing_or_malformed_dates(submitted_at: str) -> None:
     assert result.rejected.loc[0, "rejection_reasons"] == ("invalid_submitted_at",)
 
 
-def test_rejects_dates_in_the_future() -> None:
+def test_rejects_dates_in_the_future_as_invalid_dates() -> None:
     result = clean_records(records([{ "submitted_at": "2099-01-02 03:04:05" }]), CONFIG)
 
     assert result.currently_valid.empty
-    assert result.rejected.loc[0, "rejection_reasons"] == ("submitted_at_in_future",)
+    assert result.rejected.loc[0, "rejection_reasons"] == ("invalid_submitted_at",)
 
 
 @pytest.mark.parametrize(

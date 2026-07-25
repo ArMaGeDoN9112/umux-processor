@@ -221,6 +221,71 @@ Pipeline completed: raw=12 accepted=10 rejected=2 duplicates=1 output=/output
 
 `umux_processor.pipeline.run_pipeline_service(...)` — переиспользуемая граница оркестрации. CLI отвечает за разбор аргументов и сопоставление ошибок кодам завершения, а ядро пайплайна — за обработку от загрузки до аналитики. Будущий HTTP-адаптер должен вызывать тот же сервис, а не дублировать валидацию, расчёт оценок или агрегацию.
 
+## Необязательный HTTP API
+
+HTTP API — это необязательный тонкий адаптер над тем же
+`run_pipeline_service(...)`, который использует CLI. Он не содержит собственной
+логики нормализации, валидации строк, дедупликации, расчёта UMUX или агрегации.
+
+Запускать сервис следует только через Compose. По умолчанию он доступен на
+`http://localhost:8000`; порт хоста можно изменить через `UMUX_API_PORT`:
+
+```powershell
+docker compose --profile api up --build api
+
+# Другой порт хоста
+$env:UMUX_API_PORT = '8080'
+docker compose --profile api up --build api
+```
+
+`GET /health` отвечает `200` и JSON `{"status":"ok"}`. Контейнер имеет
+healthcheck этого маршрута и использует Compose init-процесс и 15-секундный
+период graceful shutdown.
+
+`POST /process` принимает `multipart/form-data` с одним или несколькими
+повторяющимися полями `files`. Каждый файл — CSV c поддерживаемым MIME-типом
+`text/csv`, `application/csv` или `application/vnd.ms-excel`. Необязательное
+поле файла `config` содержит полный TOML нормализации (`application/toml` или
+`text/plain`); оно заменяет встроенную конфигурацию только для этого запроса.
+Поле не принимает путь на сервере и не даёт читать host/container filesystem.
+
+```powershell
+curl.exe -X POST http://localhost:8000/process `
+  -F "files=@data.csv;type=text/csv" `
+  -o umux-artifacts.zip
+
+# Несколько выгрузок и конфигурация, загружаемая вместе с запросом
+curl.exe -X POST http://localhost:8000/process `
+  -F "files=@january.csv;type=text/csv" `
+  -F "files=@february.csv;type=text/csv" `
+  -F "config=@normalization.toml;type=application/toml" `
+  -o umux-artifacts.zip
+```
+
+Успешный ответ — `200 application/zip` с ровно следующими файлами:
+`cleaned_responses.csv`, `rejected_responses.csv`, `monthly_aggregates.csv`,
+`product_summary.csv`, `quality_summary.json` и `dashboard.html`.
+
+Ошибки имеют единый безопасный формат:
+
+```json
+{"error":{"code":"INPUT_ERROR","message":"Configuration or CSV input is invalid."}}
+```
+
+`400` означает повреждённый multipart-запрос, `413` — превышение лимита,
+`415` — неподдерживаемый Content-Type, `422` — ошибка TOML/схемы CSV/входа,
+а `500` — безопасная общая ошибка обработки без stack trace, путей или значений
+строк в ответе. Лимиты настраиваются при старте контейнера: `UMUX_API_MAX_FILES`
+(по умолчанию 10), `UMUX_API_MAX_FILE_BYTES` (10 MiB) и
+`UMUX_API_MAX_REQUEST_BYTES` (25 MiB).
+
+Каждый запрос записывает входы под сгенерированными безопасными именами в свой
+временный каталог внутри контейнера. Оригинальные имена не используются как
+пути, а каталог, CSV, артефакты и ZIP удаляются после отправки ответа. Это
+предотвращает traversal и пересечение артефактов параллельных запросов. Логи
+содержат только стадийные счётчики и типы ошибок; содержимое загрузок и значения
+ответов не логируются.
+
 ## Допущения и ограничения
 
 - `submitted_at` не содержит часового пояса; группировка по месяцам использует указанное значение.
