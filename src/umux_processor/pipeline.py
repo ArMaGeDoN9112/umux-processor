@@ -1,10 +1,3 @@
-"""The in-process UMUX pipeline result used by reporting adapters.
-
-This module deliberately has no CLI or filesystem orchestration.  It combines
-the completed Tasks 1--6 transformations into one immutable result so output
-adapters can consume a consistent, reconciled set of dataframes.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
