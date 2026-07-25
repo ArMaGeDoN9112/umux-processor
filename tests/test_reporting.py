@@ -36,8 +36,8 @@ def test_dashboard_contains_sections_embedded_assets_and_provided_values(tmp_pat
 
     for heading in [
         "Панель UMUX-Lite", "Сравнение продуктов и версий", "Тренды UMUX по месяцам",
-        "Комбинации с наименьшим последним UMUX", "Наибольшие отрицательные изменения по месяцам",
-        "Причины отклонения", "Качество данных", "Как читать эти показатели",
+        "Наибольшие отрицательные изменения по месяцам",
+        "Причины отклонения", "Качество данных",
     ]:
         assert heading in html
     assert "Исходные ответы" in html
@@ -46,6 +46,7 @@ def test_dashboard_contains_sections_embedded_assets_and_provided_values(tmp_pat
     assert "Plotly.newPlot" in html
     assert '<script src="https://cdn.plot.ly' not in html
     assert "Доля отклонений</h2><p>40.0%</p>" in html
+    assert "Комбинации с наименьшим последним UMUX" not in html
 
 
 def test_product_version_comparison_uses_all_time_weighted_mean_without_latest_month(tmp_path: Path) -> None:
@@ -65,12 +66,58 @@ def test_dashboard_localizes_all_interface_text_to_russian(tmp_path: Path) -> No
 
     for text in [
         'lang="ru"', "Панель UMUX-Lite", "Продукт", "Версия", "Ответы",
-        "Последний месяц", "СРЕДНИЙ UMUX", "Тренды UMUX по месяцам",
+        "СРЕДНИЙ UMUX", "Тренды UMUX по месяцам",
         "Причины отклонения", "Качество данных", "Средний UMUX",
     ]:
         assert text in html
     assert "Product and version comparison" not in html
     assert "Latest month" not in html
+
+
+def test_dashboard_embeds_interactive_filters_and_accepted_response_dimensions(tmp_path: Path) -> None:
+    result = _result()
+    result = PipelineResult(
+        accepted=pd.DataFrame(
+            [
+                {
+                    "response_id": "payments-web-new",
+                    "submitted_at": pd.Timestamp("2024-02-01"),
+                    "product": "Payments",
+                    "product_version": "2.1",
+                    "platform": "Web",
+                    "country": "US",
+                    "user_segment": "New",
+                    "umux_score": 75.0,
+                },
+                {
+                    "response_id": "search-ios-returning",
+                    "submitted_at": pd.Timestamp("2024-02-02"),
+                    "product": "Search",
+                    "product_version": "1.0",
+                    "platform": "iOS",
+                    "country": "RU",
+                    "user_segment": "Returning",
+                    "umux_score": 50.0,
+                },
+            ]
+        ),
+        rejected=result.rejected,
+        monthly_aggregates=result.monthly_aggregates,
+        product_summary=result.product_summary,
+        quality=result.quality,
+    )
+
+    html = write_dashboard(result, tmp_path, small_sample_threshold=5).read_text(encoding="utf-8")
+
+    assert "Интерактивный список ответов" in html
+    for field in ["product", "product_version", "platform", "country", "user_segment"]:
+        assert f'id="filter-{field}"' in html
+    assert '"product": "Payments"' in html
+    assert '"user_segment": "Returning"' in html
+    assert "function applyFilters()" in html
+    assert "option.disabled = !availableValues.has(option.value)" in html
+    assert 'class="table-wrap filtered-response-table"' in html
+    assert ".filtered-response-table{max-height:420px;overflow:auto}" in html
 
 
 def test_dashboard_escapes_hostile_labels_without_small_sample_notice(tmp_path: Path) -> None:

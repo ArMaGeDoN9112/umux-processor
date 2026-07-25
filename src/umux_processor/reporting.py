@@ -60,7 +60,6 @@ def _dashboard_html(result: PipelineResult, threshold: int) -> str:
     rejection_rate = float(overall.get("rejection_rate", 0.0))
     overall_mean = _overall_mean(result.product_summary)
     comparison = _comparison_summary(result.monthly_aggregates)
-    current = _current_combinations(result.monthly_aggregates)
 
     charts = [
         _trend_chart(result.monthly_aggregates),
@@ -75,13 +74,12 @@ def _dashboard_html(result: PipelineResult, threshold: int) -> str:
 <section class="cards" aria-label="Ключевые показатели">
 {_card("Исходные ответы", str(raw))}{_card("Принятые ответы", str(accepted))}{_card("Доля отклонений", _percent(rejection_rate))}{_card("Средний UMUX", _number(overall_mean))}
 </section>
+{_interactive_response_list(result.accepted)}
 <section><h2>Сравнение продуктов и версий</h2>{_comparison_table(comparison)}</section>
 <section><h2>Тренды UMUX по месяцам</h2><p>Подпись каждой точки показывает число принятых ответов. Пропуски означают календарные месяцы без принятых ответов для этой пары продукта и версии и не считаются изменением.</p>{charts[0]}</section>
-<section><h2>Комбинации с наименьшим последним UMUX</h2>{_insight_table(current.sort_values(["latest_mean_umux", "product", "product_version"], kind="stable") if not current.empty else current, ["product", "product_version", "latest_month", "latest_mean_umux", "total_valid_responses"], ["Продукт", "Версия", "Последний месяц", "Последний UMUX", "Ответы"])}</section>
 <section><h2>Наибольшие отрицательные изменения по месяцам</h2>{_negative_changes(result.monthly_aggregates)}</section>
 <section><h2>Причины отклонения</h2>{charts[1]}{_insight_table(result.quality.by_rejection_reason, ["rejection_reason", "rejected_row_count"], ["Причина", "Отклонено строк"])}</section>
 <section><h2>Качество данных</h2>{charts[2]}{_insight_table(result.quality.by_product, ["product", "raw_row_count", "accepted_row_count", "rejected_row_count", "rejection_rate"], ["Продукт", "Исходные", "Принятые", "Отклонённые", "Доля отклонений"], percent_columns={"rejection_rate"})}</section>
-    <section><h2>Как читать эти показатели</h2><p>UMUX-Lite рассчитывается только по принятым анкетам: <code>((score1 − 1) + (score2 − 1)) / 8 × 100</code>. Общее среднее — это взвешенное по количеству ответов объединение предоставленных итогов по продуктам. Доля отклонений — отношение отклонённых исходных строк ко всем загруженным исходным строкам, включая исключённые дубликаты.</p></section>
 </main></body></html>"""
 
 
@@ -95,16 +93,78 @@ def _overall_mean(product_summary: pd.DataFrame) -> float | None:
     return float((counts * means).sum() / total) if total else None
 
 
-def _current_combinations(monthly: pd.DataFrame) -> pd.DataFrame:
-    required = {"month", "product", "product_version", "valid_responses", "mean_umux"}
-    if monthly.empty or not required.issubset(monthly.columns):
-        return pd.DataFrame(columns=["product", "product_version", "total_valid_responses", "latest_month", "latest_mean_umux"])
-    rows: list[dict[str, object]] = []
-    for (product, version), group in monthly.groupby(["product", "product_version"], sort=True, dropna=False):
-        ordered = group.sort_values("month", kind="stable")
-        latest = ordered.iloc[-1]
-        rows.append({"product": product, "product_version": version, "total_valid_responses": int(ordered["valid_responses"].sum()), "latest_month": latest["month"], "latest_mean_umux": float(latest["mean_umux"])})
-    return pd.DataFrame(rows)
+def _interactive_response_list(accepted: pd.DataFrame) -> str:
+    dimensions = ["product", "product_version", "platform", "country", "user_segment"]
+    if accepted.empty or not set(dimensions).issubset(accepted.columns):
+        return '<section><h2>Интерактивный список ответов</h2><p class="empty">Нет принятых ответов для фильтрации.</p></section>'
+
+    columns = [column for column in ["response_id", "submitted_at", *dimensions, "umux_score"] if column in accepted.columns]
+    records = accepted.loc[:, columns].where(pd.notna(accepted.loc[:, columns]), None).to_dict("records")
+    payload = _safe_json(records)
+    labels = {
+        "response_id": "Идентификатор ответа",
+        "submitted_at": "Дата ответа",
+        "product": "Продукт",
+        "product_version": "Версия",
+        "platform": "Платформа",
+        "country": "Страна",
+        "user_segment": "Сегмент пользователя",
+        "umux_score": "UMUX",
+    }
+    filters = "".join(
+        f'<label>{labels[field]}<select id="filter-{field}" data-filter="{field}"><option value="">Все значения</option></select></label>'
+        for field in dimensions
+    )
+    header = "".join(f"<th>{html.escape(labels.get(column, column))}</th>" for column in columns)
+    return f'''<section><h2>Интерактивный список ответов</h2>
+<p>Выберите одно или несколько значений. Список и доступные значения остальных фильтров будут показывать только подходящие ответы.</p>
+<div class="filters">{filters}</div><p id="filtered-response-count" aria-live="polite"></p>
+<div class="table-wrap filtered-response-table"><table><thead><tr>{header}</tr></thead><tbody id="filtered-responses"></tbody></table></div>
+<script>
+const filterableRecords = {payload};
+const filterFields = ["product", "product_version", "platform", "country", "user_segment"];
+const responseColumns = {_safe_json(columns)};
+const responseBody = document.getElementById("filtered-responses");
+const responseCount = document.getElementById("filtered-response-count");
+function applyFilters() {{
+  const selected = Object.fromEntries(filterFields.map((field) => [field, document.getElementById(`filter-${{field}}`).value]));
+  const matching = filterableRecords.filter((record) => filterFields.every((field) => !selected[field] || record[field] === selected[field]));
+  filterFields.forEach((field) => {{
+    const availableValues = new Set(filterableRecords
+      .filter((record) => filterFields.every((other) => other === field || !selected[other] || record[other] === selected[other]))
+      .map((record) => String(record[field])));
+    const select = document.getElementById(`filter-${{field}}`);
+    Array.from(select.options).forEach((option) => {{
+      if (!option.value) return;
+      option.disabled = !availableValues.has(option.value);
+      option.hidden = option.disabled;
+    }});
+  }});
+  responseBody.replaceChildren(...matching.map((record) => {{
+    const row = document.createElement("tr");
+    responseColumns.forEach((column) => {{
+      const cell = document.createElement("td");
+      cell.textContent = record[column] ?? "—";
+      row.append(cell);
+    }});
+    return row;
+  }}));
+  responseCount.textContent = `Подходящих ответов: ${{matching.length}}`;
+}}
+filterFields.forEach((field) => {{
+  const select = document.getElementById(`filter-${{field}}`);
+  [...new Set(filterableRecords.map((record) => String(record[field])))].sort((left, right) => left.localeCompare(right, "ru")).forEach((value) => {{
+    const option = new Option(value, value);
+    select.add(option);
+  }});
+  select.addEventListener("change", applyFilters);
+}});
+applyFilters();
+</script></section>'''
+
+
+def _safe_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def _comparison_summary(monthly: pd.DataFrame) -> pd.DataFrame:
@@ -219,5 +279,5 @@ def _display(value: object) -> str:
 
 
 _STYLE = """
-body{margin:0;background:#f5f7fb;color:#172033;font:16px system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}main{max-width:1200px;margin:auto;padding:28px}h1{margin-bottom:0}.lede{color:#4d5b73}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:24px 0}.card,section{background:#fff;border:1px solid #dfe5ef;border-radius:10px;padding:18px;margin:20px 0;box-shadow:0 1px 2px #1720330d}.card h2{font-size:.9rem;margin:0;color:#4d5b73}.card p{font-size:2rem;font-weight:700;margin:8px 0 0}.chart{min-height:380px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e4e8f0}th{background:#f8faff}.empty{color:#4d5b73;font-style:italic}code{background:#f1f3f7;padding:2px 4px;border-radius:3px}@media(max-width:600px){main{padding:16px}.chart{min-height:320px}}
+body{margin:0;background:#f5f7fb;color:#172033;font:16px system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.45}main{max-width:1200px;margin:auto;padding:28px}h1{margin-bottom:0}.lede{color:#4d5b73}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;margin:24px 0}.card,section{background:#fff;border:1px solid #dfe5ef;border-radius:10px;padding:18px;margin:20px 0;box-shadow:0 1px 2px #1720330d}.card h2{font-size:.9rem;margin:0;color:#4d5b73}.card p{font-size:2rem;font-weight:700;margin:8px 0 0}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.filters label{display:grid;gap:4px;color:#4d5b73;font-weight:600}.filters select{border:1px solid #bac5d8;border-radius:5px;background:#fff;padding:8px;color:#172033;font:inherit}.chart{min-height:380px}.table-wrap{overflow-x:auto}.filtered-response-table{max-height:420px;overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e4e8f0}th{background:#f8faff}.empty{color:#4d5b73;font-style:italic}code{background:#f1f3f7;padding:2px 4px;border-radius:3px}@media(max-width:600px){main{padding:16px}.chart{min-height:320px}}
 """
