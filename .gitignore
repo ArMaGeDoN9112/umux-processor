@@ -61,7 +61,7 @@ secrets/
 input/
 inputs/
 data/
-output/
+# output/
 outputs/
 artifacts/
 reports/
